@@ -1,0 +1,897 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>90초 블록 블라스트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Gowun+Dodum&family=Do+Hyeon&display=swap">
+<style>
+/* Layout: one column toy console — HUD strip, 8x8 tray-board, three-piece dock below. */
+:root {
+  --bg: #e9eef6;
+  --panel: #f8fafd;
+  --board: #22304a;
+  --well: #2c3b58;
+  --ink: #1b2436;
+  --muted: #5d6a82;
+  --accent: #ff6b3d;
+  --warn: #e0312b;
+  --line: rgba(27,36,54,.12);
+  --c0: #ff6b3d; --c1: #ffc23d; --c2: #3ec98b; --c3: #3fa7ff; --c4: #9b6bff; --c5: #ff5c9a; --c6: #2fd3d0;
+  --display: "Bungee", "Do Hyeon", system-ui, sans-serif;
+  --ko-display: "Do Hyeon", system-ui, sans-serif;
+  --body: "Gowun Dodum", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121826; --panel: #1a2234; --board: #0d1320; --well: #1b2438;
+  --ink: #eef2fa; --muted: #98a3ba; --line: rgba(238,242,250,.12); color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #121826; --panel: #1a2234; --board: #0d1320; --well: #1b2438;
+  --ink: #eef2fa; --muted: #98a3ba; --line: rgba(238,242,250,.12); color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--ink); font-family: var(--body);
+  padding-inline: 16px; touch-action: none; user-select: none; -webkit-user-select: none;
+  overflow: hidden;
+}
+.app { max-width: 440px; margin: 0 auto; height: 100%; display: flex; flex-direction: column; gap: 12px; padding-block: 14px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h1 { margin: 0; font-family: var(--display); font-size: 20px; letter-spacing: .02em; line-height: 1; }
+h1 span { color: var(--accent); }
+.meta { display: flex; align-items: center; gap: 12px; }
+.best { font-size: 13px; color: var(--muted); }
+.best b { font-family: var(--display); font-weight: 400; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sound {
+  font: 12px var(--body); color: var(--muted); background: transparent; border: 1px solid var(--line);
+  border-radius: 999px; padding: 4px 10px; cursor: pointer;
+}
+.sound:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.hud { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 6px 12px; }
+.score { font-family: var(--display); font-size: 44px; line-height: .9; font-variant-numeric: tabular-nums; transform-origin: left bottom; }
+.score.bump { animation: bump .35s ease-out; }
+@keyframes bump { 30% { transform: scale(1.1); color: var(--accent); } }
+.label { font-size: 11px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; }
+.time { text-align: right; }
+.time .num { font-family: var(--display); font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
+.time.low .num { color: var(--warn); animation: pulse 1s infinite; }
+.bar { grid-column: 1 / -1; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: left; transition: background .3s; }
+.bar.low i { background: var(--warn); }
+@keyframes pulse { 50% { opacity: .45; } }
+
+.stage { position: relative; }
+.stage.shake1 { animation: shake1 .25s; }
+.stage.shake2 { animation: shake2 .4s; }
+.stage.shake3 { animation: shake3 .55s; }
+@keyframes shake1 { 25% { transform: translate(-3px, 2px); } 50% { transform: translate(3px, -2px); } 75% { transform: translate(-2px, 1px); } }
+@keyframes shake2 { 15% { transform: translate(-6px, 3px) rotate(-.5deg); } 35% { transform: translate(6px, -4px) rotate(.5deg); } 55% { transform: translate(-4px, 3px); } 75% { transform: translate(3px, -2px); } }
+@keyframes shake3 { 10% { transform: translate(-9px, 5px) rotate(-1deg); } 25% { transform: translate(9px, -6px) rotate(1deg); } 40% { transform: translate(-7px, 4px) rotate(-.6deg); } 60% { transform: translate(5px, -3px); } 80% { transform: translate(-2px, 2px); } }
+.board {
+  position: relative; display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px;
+  padding: 8px; border-radius: 14px; background: var(--board); aspect-ratio: 1; max-width: 100%;
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.06), 0 10px 30px rgba(20,30,50,.25);
+  transition: box-shadow .3s;
+}
+.board.combo { box-shadow: inset 0 2px 0 rgba(255,255,255,.06), 0 0 0 3px var(--c1), 0 0 28px var(--c1); }
+.cell { border-radius: 4px; background: var(--well); position: relative; }
+.cell.f, .pc {
+  background: var(--col);
+  box-shadow: inset 0 -4px 0 rgba(0,0,0,.22), inset 0 3px 0 rgba(255,255,255,.35);
+}
+.cell.g { background: var(--col); opacity: .5; }
+.cell.hl { filter: brightness(1.35) saturate(1.2); box-shadow: 0 0 0 2px #fff inset, 0 0 10px rgba(255,255,255,.6); }
+.cell:not(.f):not(.g).hl { background: color-mix(in srgb, var(--hlc) 45%, var(--well)); }
+.cell.land { animation: land .2s ease-out; }
+@keyframes land { 0% { transform: scale(1.18); filter: brightness(1.5); } 100% { transform: scale(1); } }
+.cell.boom { animation: boom .42s cubic-bezier(.3,.6,.4,1) forwards; animation-delay: var(--d, 0ms); z-index: 2; }
+@keyframes boom {
+  0% { transform: scale(1); filter: brightness(1); }
+  30% { transform: scale(1.22); filter: brightness(2.6); background: #fff; }
+  100% { transform: scale(0) rotate(25deg); opacity: 0; }
+}
+
+.beam {
+  position: absolute; pointer-events: none; z-index: 3; border-radius: 6px;
+  background: linear-gradient(var(--dir), transparent, rgba(255,255,255,.95) 45%, #fff 50%, rgba(255,255,255,.95) 55%, transparent);
+  box-shadow: 0 0 24px 6px var(--glow);
+  animation: beam .45s ease-out forwards; animation-delay: var(--d, 0ms); opacity: 0;
+}
+.beam.row { --dir: to bottom; transform-origin: center; }
+.beam.col { --dir: to right; transform-origin: center; }
+@keyframes beam {
+  0% { opacity: 1; transform: scaleX(var(--sx0, 1)) scaleY(var(--sy0, 1)); }
+  40% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.0) scaleX(var(--sx1, 1)) scaleY(var(--sy1, 1)); }
+}
+
+.pop {
+  position: absolute; pointer-events: none; font-family: var(--display); color: #fff;
+  font-size: 28px; text-shadow: 0 3px 0 rgba(0,0,0,.35); transform: translate(-50%, -50%);
+  animation: rise 1s ease-out forwards; white-space: nowrap; z-index: 6;
+}
+.pop.big { font-size: 40px; }
+@keyframes rise { 0% { opacity: 0; transform: translate(-50%, -30%) scale(.5); } 18% { opacity: 1; transform: translate(-50%, -60%) scale(1.15); } 30% { transform: translate(-50%, -60%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -150%) scale(1); } }
+.banner {
+  position: absolute; left: 50%; top: 42%; z-index: 7; pointer-events: none; white-space: nowrap;
+  font-family: var(--ko-display); font-size: 54px; color: var(--c1);
+  -webkit-text-stroke: 2px #6a3a00; text-shadow: 0 5px 0 #6a3a00, 0 0 30px rgba(255,194,61,.7);
+  animation: banner 1.1s cubic-bezier(.2,1.4,.4,1) forwards;
+}
+.banner small { display: block; text-align: center; font-size: 24px; color: #fff; -webkit-text-stroke: 0; text-shadow: 0 2px 0 rgba(0,0,0,.4); }
+@keyframes banner { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.3) rotate(-8deg); } 25% { opacity: 1; transform: translate(-50%, -50%) scale(1.1) rotate(-3deg); } 75% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-3deg); } 100% { opacity: 0; transform: translate(-50%, -80%) scale(.9) rotate(-3deg); } }
+
+.dock { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; min-height: 120px; flex: 1; max-height: 150px; }
+.slot {
+  display: grid; place-items: center; border-radius: 12px; background: var(--panel);
+  border: 1px solid var(--line); cursor: grab; position: relative; transition: transform .12s, background .12s;
+}
+.slot:not(.empty):not(.dead):hover { transform: translateY(-3px); background: color-mix(in srgb, var(--panel) 85%, var(--accent)); }
+.slot.dead { cursor: not-allowed; }
+.slot.dead .piece { opacity: .3; filter: grayscale(.8); }
+.slot.empty { cursor: default; }
+.slot.in .piece { animation: deal .3s cubic-bezier(.2,1.5,.4,1) backwards; animation-delay: var(--d, 0ms); }
+@keyframes deal { 0% { transform: translateY(30px) scale(.4); opacity: 0; } }
+.piece { display: grid; gap: 2px; pointer-events: none; }
+.piece .pc, .piece .pe { width: var(--s); height: var(--s); border-radius: 3px; }
+.slot.lift .piece { visibility: hidden; }
+
+.drag {
+  position: fixed; left: 0; top: 0; display: grid; pointer-events: none; z-index: 20;
+  filter: drop-shadow(0 12px 14px rgba(0,0,0,.35)); transition: scale .14s ease-out;
+  will-change: translate;
+}
+.drag.back { transition: translate .18s ease-in, scale .18s ease-in; }
+.drag .pc, .drag .pe { width: var(--s); height: var(--s); border-radius: 4px; }
+body.dragging, body.dragging * { cursor: grabbing !important; }
+
+#fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 30; }
+
+.overlay {
+  position: absolute; inset: 0; border-radius: 14px; display: grid; place-items: center; z-index: 10;
+  background: rgba(13,19,32,.72); backdrop-filter: blur(3px); color: #fff; text-align: center; padding: 20px;
+}
+.overlay h2 { margin: 0 0 6px; font-family: var(--ko-display); font-weight: 400; font-size: 34px; text-wrap: balance; }
+.overlay p { margin: 0 0 18px; color: #c9d2e4; line-height: 1.5; font-size: 15px; }
+.overlay .big { font-family: var(--display); font-size: 56px; line-height: 1; margin-bottom: 4px; color: var(--c1); }
+.overlay .rule { font-size: 13px; color: #c9d2e4; margin-top: 16px; line-height: 1.6; }
+.btn {
+  font-family: var(--ko-display); font-size: 22px; color: #fff; background: var(--accent); border: 0;
+  padding: 12px 34px; border-radius: 999px; cursor: pointer; box-shadow: 0 5px 0 #c4441e;
+}
+.btn:hover { filter: brightness(1.06); }
+.btn:active { transform: translateY(3px); box-shadow: 0 2px 0 #c4441e; }
+.btn:focus-visible { outline: 3px solid var(--c1); outline-offset: 3px; }
+.nickrow { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0 0 14px; font-size: 14px; color: #c9d2e4; }
+.nickrow input { user-select: text; -webkit-user-select: text; font: 15px var(--body); width: 11em; padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.1); color: #fff; }
+.nickrow input:focus-visible { outline: 2px solid var(--c1); outline-offset: 1px; }
+.new { color: var(--c1); font-family: var(--ko-display); font-size: 20px; margin-bottom: 6px; }
+.overlay { overflow-y: auto; }
+.overlay > div { width: 100%; max-width: 300px; }
+.overlay .rank { font-family: var(--ko-display); font-size: 20px; color: #fff; margin: 0 0 14px; }
+.overlay .rank b { color: var(--c1); font-weight: 400; }
+
+.chase {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: 22px;
+  font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.chase b { color: var(--ink); font-weight: 400; font-family: var(--ko-display); font-size: 16px; }
+.chase .tag {
+  font-family: var(--display); font-size: 12px; color: #fff; background: var(--accent);
+  padding: 2px 8px; border-radius: 999px; line-height: 1.4;
+}
+.chase.top .tag { background: var(--c2); }
+.chase.hot .tag { animation: pulse .6s infinite; }
+
+.lb { margin-top: 18px; text-align: left; }
+.lb h3 { margin: 0 0 6px; font: 12px var(--body); letter-spacing: .12em; color: #9fb0cc; display: flex; justify-content: space-between; }
+.lb ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.lb li {
+  display: grid; grid-template-columns: 26px 10px 1fr auto; align-items: center; gap: 8px;
+  padding: 4px 10px; border-radius: 8px; background: rgba(255,255,255,.06); font-size: 14px;
+}
+.lb li.me { background: rgba(255,194,61,.22); box-shadow: inset 0 0 0 1px var(--c1); }
+.lb li.gap { background: none; justify-content: center; display: block; text-align: center; padding: 0; color: #9fb0cc; line-height: 1; }
+.lb .no { font-family: var(--display); font-size: 13px; color: #9fb0cc; }
+.lb li:nth-child(1) .no { color: var(--c1); }
+.lb .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--pc, #9fb0cc); }
+.lb .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb .sc { font-family: var(--display); font-size: 14px; font-variant-numeric: tabular-nums; }
+.lb .empty { font-size: 13px; color: #9fb0cc; padding: 6px 0; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <h1>BLOCK <span>90</span></h1>
+    <div class="meta">
+      <div class="best">최고 점수 <b id="best">0</b></div>
+      <button class="sound" id="soundBtn" type="button" aria-pressed="true">소리 켬</button>
+    </div>
+  </header>
+  <div class="hud">
+    <div><div class="label">점수</div><div class="score" id="score">0</div></div>
+    <div class="time" id="timeBox"><div class="label">남은 시간</div><div class="num" id="time">1:30</div></div>
+    <div class="bar" id="bar"><i id="barFill"></i></div>
+    <div class="chase" id="chase" aria-live="polite"></div>
+  </div>
+  <div class="stage" id="stage">
+    <div class="board" id="board"></div>
+    <div class="overlay" id="overlay">
+      <div>
+        <h2>90초 블록 블라스트</h2>
+        <p>블록을 끌어다 가로줄이나 세로줄을 채우세요.<br>여러 줄, 연속 콤보는 보너스!</p>
+        <label class="nickrow" for="nick">닉네임 <input id="nick" maxlength="12" autocomplete="nickname" placeholder="순위에 표시될 이름"></label>
+        <button class="btn" id="startBtn">시작</button>
+        <div class="lb" id="lbStart"></div>
+      </div>
+    </div>
+  </div>
+  <div class="dock" id="dock"></div>
+</div>
+<canvas id="fx"></canvas>
+
+<script>
+(() => {
+  const N = 8, TIME = 90;
+  const COLORS = ['--c0','--c1','--c2','--c3','--c4','--c5','--c6'];
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Base shapes as [row, col] lists; rotations are generated.
+  const BASE = [
+    [[0,0]],
+    [[0,0],[0,1]],
+    [[0,0],[0,1],[0,2]],
+    [[0,0],[0,1],[0,2],[0,3]],
+    [[0,0],[0,1],[0,2],[0,3],[0,4]],
+    [[0,0],[0,1],[1,0],[1,1]],
+    [[0,0],[0,1],[0,2],[1,0],[1,1],[1,2],[2,0],[2,1],[2,2]],
+    [[0,0],[1,0],[1,1]],
+    [[0,0],[1,0],[2,0],[2,1]],
+    [[0,0],[1,0],[2,0],[2,1],[2,2]],
+    [[0,0],[0,1],[0,2],[1,1]],
+    [[0,1],[0,2],[1,0],[1,1]],
+    [[0,0],[0,1],[0,2],[1,0],[1,1],[1,2]],
+  ];
+  const WEIGHT = [2,3,3,3,2,3,1,3,3,1,2,2,2];
+  const norm = s => {
+    const mr = Math.min(...s.map(p=>p[0])), mc = Math.min(...s.map(p=>p[1]));
+    return s.map(([r,c]) => [r-mr, c-mc]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  };
+  const SHAPES = [];
+  BASE.forEach((b, i) => {
+    const seen = new Map(); let s = b;
+    for (let k = 0; k < 4; k++) {
+      s = norm(s.map(([r,c]) => [c,-r]));
+      seen.set(JSON.stringify(s), s);
+    }
+    // Rotations of the same base share its weight.
+    seen.forEach(cells => SHAPES.push({ cells, w: WEIGHT[i] / seen.size }));
+  });
+  const totalW = SHAPES.reduce((a, s) => a + s.w, 0);
+
+  const $ = id => document.getElementById(id);
+  const boardEl = $('board'), dockEl = $('dock'), overlay = $('overlay'), stage = $('stage');
+  let grid, cells = [], tray, score, combo, timeLeft, running = false, lastTick, raf, best = 0;
+  const fading = new Map(); // cell index -> { color, delay } while its clear animation plays
+  try { best = +localStorage.getItem('block90-best') || 0; } catch (e) {}
+  $('best').textContent = best;
+
+  for (let i = 0; i < N*N; i++) { const d = document.createElement('div'); d.className = 'cell'; boardEl.appendChild(d); cells.push(d); }
+
+  /* ---------- Sound (Web Audio, synthesized) ---------- */
+  let ac = null, soundOn = true;
+  try { soundOn = localStorage.getItem('block90-sound') !== 'off'; } catch (e) {}
+  const soundBtn = $('soundBtn');
+  const syncSoundBtn = () => { soundBtn.textContent = soundOn ? '소리 켬' : '소리 끔'; soundBtn.setAttribute('aria-pressed', soundOn); };
+  syncSoundBtn();
+  soundBtn.addEventListener('click', () => {
+    soundOn = !soundOn; syncSoundBtn();
+    try { localStorage.setItem('block90-sound', soundOn ? 'on' : 'off'); } catch (e) {}
+  });
+  function audio() {
+    if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (ac.state === 'suspended') ac.resume();
+    return ac;
+  }
+  function tone(freq, start, dur, type = 'sine', vol = .2, slideTo) {
+    const a = soundOn && audio(); if (!a) return;
+    const t = a.currentTime + start, o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + .01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + .02);
+  }
+  function noise(start, dur, vol = .25, freq = 1800) {
+    const a = soundOn && audio(); if (!a) return;
+    const len = Math.floor(a.sampleRate * dur), buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 2;
+    const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+    f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = .8; g.gain.value = vol;
+    src.buffer = buf; src.connect(f).connect(g).connect(a.destination); src.start(a.currentTime + start);
+  }
+  const sfx = {
+    pick: () => tone(520, 0, .06, 'triangle', .08, 700),
+    place: () => { tone(160, 0, .09, 'triangle', .3, 90); noise(0, .05, .12, 900); },
+    back: () => tone(300, 0, .12, 'sine', .08, 180),
+    clear(lines, combo) {
+      const base = 523.25 * Math.pow(2, Math.min(combo - 1, 7) / 12);
+      const steps = [0, 4, 7, 12, 16, 19].slice(0, 3 + Math.min(lines, 3));
+      steps.forEach((s, i) => tone(base * Math.pow(2, s / 12), i * .05, .28, 'triangle', .14));
+      noise(0, .35 + lines * .08, .22, 2400);
+      tone(90, 0, .25 + lines * .05, 'sine', .35, 45);
+    },
+    over: () => [392, 330, 262].forEach((f, i) => tone(f, i * .14, .3, 'triangle', .14)),
+  };
+
+  /* ---------- Particles ---------- */
+  const fx = $('fx'), ctx = fx.getContext('2d');
+  let parts = [], fxRaf = 0, dpr = 1;
+  function sizeFx() { dpr = Math.min(2, window.devicePixelRatio || 1); fx.width = innerWidth * dpr; fx.height = innerHeight * dpr; }
+  sizeFx();
+  const cssColor = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim() || '#fff';
+  function burst(x, y, color, size, n) {
+    if (reduceMotion) return;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 2 + Math.random() * 6;
+      parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 3, s: size * (.18 + Math.random() * .3),
+        r: Math.random() * 6, vr: (Math.random() - .5) * .4, life: 1, decay: .014 + Math.random() * .02,
+        color: Math.random() < .25 ? '#ffffff' : color });
+    }
+    if (!fxRaf) fxRaf = requestAnimationFrame(stepFx);
+  }
+  function stepFx() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    parts = parts.filter(p => p.life > 0);
+    for (const p of parts) {
+      p.vy += .32; p.vx *= .985; p.x += p.vx; p.y += p.vy; p.r += p.vr; p.life -= p.decay;
+      ctx.save(); ctx.globalAlpha = Math.max(0, p.life); ctx.translate(p.x, p.y); ctx.rotate(p.r);
+      ctx.fillStyle = p.color; ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s); ctx.restore();
+    }
+    fxRaf = parts.length ? requestAnimationFrame(stepFx) : 0;
+    if (!fxRaf) ctx.clearRect(0, 0, innerWidth, innerHeight);
+  }
+
+  /* ---------- Board logic ---------- */
+  function pickShape() {
+    let r = Math.random() * totalW;
+    for (const s of SHAPES) { r -= s.w; if (r <= 0) return s.cells; }
+    return SHAPES[0].cells;
+  }
+  const dims = s => [Math.max(...s.map(p=>p[0]))+1, Math.max(...s.map(p=>p[1]))+1];
+  const fits = (s, r0, c0) => s.every(([r,c]) => { const R=r0+r, C=c0+c; return R>=0&&C>=0&&R<N&&C<N&&!grid[R][C]; });
+  const anyFit = s => { for (let r=0;r<N;r++) for (let c=0;c<N;c++) if (fits(s,r,c)) return true; return false; };
+
+  function newTray() {
+    tray = [0,1,2].map(() => ({ cells: pickShape(), color: COLORS[Math.floor(Math.random()*COLORS.length)] }));
+    // Keep at least one placeable piece on a fresh tray when possible.
+    for (let tries = 0; tries < 20 && !tray.some(p => anyFit(p.cells)); tries++) tray[0].cells = pickShape();
+  }
+
+  function renderBoard(ghost, clearLines) {
+    for (let r=0;r<N;r++) for (let c=0;c<N;c++) {
+      const k = r*N+c, el = cells[k], v = grid[r][c], f = fading.get(k);
+      if (!v && f) {
+        el.className = 'cell f boom'; el.style.setProperty('--col', `var(${f.color})`); el.style.setProperty('--d', f.delay + 'ms');
+        continue;
+      }
+      el.className = 'cell' + (v ? ' f' : '');
+      el.style.setProperty('--col', v ? `var(${v})` : '');
+      el.style.removeProperty('--d');
+    }
+    if (ghost) {
+      for (const [r,c] of ghost.cells) {
+        const el = cells[(ghost.r+r)*N + ghost.c+c];
+        el.className = 'cell g'; el.style.setProperty('--col', `var(${ghost.color})`);
+      }
+      if (clearLines) {
+        const mark = k => { cells[k].classList.add('hl'); cells[k].style.setProperty('--hlc', `var(${ghost.color})`); };
+        for (const r of clearLines.rows) for (let c=0;c<N;c++) mark(r*N+c);
+        for (const c of clearLines.cols) for (let r=0;r<N;r++) mark(r*N+c);
+      }
+    }
+  }
+
+  function pieceEl(p, size, gap) {
+    const [h, w] = dims(p.cells);
+    const el = document.createElement('div');
+    el.className = 'piece';
+    el.style.gridTemplateColumns = `repeat(${w}, ${size}px)`;
+    el.style.gap = gap + 'px';
+    el.style.setProperty('--s', size + 'px');
+    const set = new Set(p.cells.map(([r,c]) => r+','+c));
+    for (let r=0;r<h;r++) for (let c=0;c<w;c++) {
+      const d = document.createElement('div');
+      if (set.has(r+','+c)) { d.className = 'pc'; d.style.setProperty('--col', `var(${p.color})`); }
+      else d.className = 'pe';
+      el.appendChild(d);
+    }
+    return el;
+  }
+
+  function renderDock(deal) {
+    dockEl.innerHTML = '';
+    const slotW = (dockEl.clientWidth - 20) / 3;
+    tray.forEach((p, i) => {
+      const slot = document.createElement('div');
+      slot.className = 'slot' + (deal ? ' in' : ''); slot.dataset.i = i;
+      slot.style.setProperty('--d', i * 70 + 'ms');
+      if (!p) { slot.classList.add('empty'); dockEl.appendChild(slot); return; }
+      const [h, w] = dims(p.cells);
+      const size = Math.max(10, Math.min(22, Math.floor((slotW - 20) / Math.max(w, h)) - 2));
+      slot.appendChild(pieceEl(p, size, 2));
+      if (running && !anyFit(p.cells)) slot.classList.add('dead');
+      slot.addEventListener('pointerdown', e => startDrag(e, i, slot));
+      dockEl.appendChild(slot);
+    });
+  }
+
+  /* ---------- Drag and drop ---------- */
+  // The piece keeps the exact point you grabbed under the cursor, grows to board size,
+  // and snaps to the nearest open spot within one cell of where it hovers.
+  let drag = null;
+  function cellMetrics() {
+    const first = cells[0].getBoundingClientRect(), second = cells[1].getBoundingClientRect();
+    return { left: first.left, top: first.top, step: second.left - first.left, size: first.width };
+  }
+  function startDrag(e, i, slot) {
+    if (!running || !tray[i] || drag || e.button > 0) return;
+    e.preventDefault();
+    const p = tray[i], m = cellMetrics();
+    const gap = m.step - m.size;
+    const [h, w] = dims(p.cells);
+    const W = w * m.step - gap, H = h * m.step - gap;
+    const src = slot.querySelector('.piece').getBoundingClientRect();
+    // Where inside the piece the pointer grabbed it (0..1), so it doesn't jump.
+    const touch = e.pointerType === 'touch';
+    const fx = touch ? .5 : Math.min(1, Math.max(0, (e.clientX - src.left) / src.width));
+    const fy = touch ? 1 : Math.min(1, Math.max(0, (e.clientY - src.top) / src.height));
+    const el = pieceEl(p, m.size, gap);
+    el.className = 'drag';
+    el.style.transformOrigin = `${fx * 100}% ${fy * 100}%`;
+    el.style.scale = String(src.width / W);
+    document.body.appendChild(el);
+    const lift = touch ? m.step * 1.4 : 0;
+    drag = { i, p, el, slot, W, H, fx, fy, m, lift, ghost: null, key: '' };
+    slot.classList.add('lift');
+    document.body.classList.add('dragging');
+    try { slot.setPointerCapture(e.pointerId); } catch (err) {}
+    moveDrag(e);
+    requestAnimationFrame(() => { if (drag && drag.el === el) el.style.scale = '1'; });
+    sfx.pick();
+  }
+  function findSpot(cellsOf, fr, fc) {
+    // fr/fc: fractional grid position of the piece's top-left corner.
+    const r0 = Math.round(fr), c0 = Math.round(fc);
+    const [h, w] = dims(cellsOf);
+    if (fr < -h * .6 || fc < -w * .6 || fr > N - h * .4 || fc > N - w * .4) return null;
+    let bestSpot = null, bestD = Infinity;
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      const r = r0 + dr, c = c0 + dc;
+      if (!fits(cellsOf, r, c)) continue;
+      const d = (r - fr) ** 2 + (c - fc) ** 2;
+      if (d < bestD && d < 1.1) { bestD = d; bestSpot = { r, c }; }
+    }
+    return bestSpot;
+  }
+  function moveDrag(e) {
+    if (!drag) return;
+    const { el, W, H, fx, fy, m, lift } = drag;
+    const x = e.clientX - fx * W, y = e.clientY - fy * H - lift;
+    el.style.translate = `${x}px ${y}px`;
+    drag.x = x; drag.y = y;
+    const spot = findSpot(drag.p.cells, (y - m.top) / m.step, (x - m.left) / m.step);
+    const key = spot ? spot.r + ',' + spot.c : '';
+    if (key === drag.key) return;
+    drag.key = key;
+    if (spot) {
+      drag.ghost = { cells: drag.p.cells, r: spot.r, c: spot.c, color: drag.p.color };
+      renderBoard(drag.ghost, linesIf(drag.p.cells, spot.r, spot.c));
+    } else { drag.ghost = null; renderBoard(); }
+  }
+  function endDrag() {
+    if (!drag) return;
+    const d = drag; drag = null;
+    document.body.classList.remove('dragging');
+    if (d.ghost && running) {
+      d.el.remove(); d.slot.classList.remove('lift');
+      place(d.i, d.ghost.r, d.ghost.c);
+      return;
+    }
+    // Not droppable: glide back to the tray.
+    renderBoard();
+    sfx.back();
+    const src = d.slot.getBoundingClientRect();
+    d.el.classList.add('back');
+    d.el.style.transformOrigin = '50% 50%';
+    d.el.style.translate = `${src.left + src.width / 2 - d.W / 2}px ${src.top + src.height / 2 - d.H / 2}px`;
+    d.el.style.scale = String(Math.min(1, (src.width - 24) / d.W, (src.height - 24) / d.H));
+    setTimeout(() => { d.el.remove(); d.slot.classList.remove('lift'); }, 190);
+  }
+  window.addEventListener('pointermove', moveDrag);
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+
+  function linesIf(s, r0, c0) {
+    const g = grid.map(row => row.slice());
+    for (const [r,c] of s) g[r0+r][c0+c] = 1;
+    const rows = [], cols = [];
+    for (let r=0;r<N;r++) if (g[r].every(Boolean)) rows.push(r);
+    for (let c=0;c<N;c++) if (g.every(row => row[c])) cols.push(c);
+    return { rows, cols };
+  }
+
+  function place(i, r0, c0) {
+    const p = tray[i];
+    const { rows, cols } = linesIf(p.cells, r0, c0);
+    for (const [r,c] of p.cells) grid[r0+r][c0+c] = p.color;
+    tray[i] = null;
+    let gained = p.cells.length;
+    const n = rows.length + cols.length;
+    const [ph, pw] = dims(p.cells);
+    const cr = r0 + ph / 2, cc = c0 + pw / 2;
+    renderBoard();
+    for (const [r,c] of p.cells) cells[(r0+r)*N + c0+c].classList.add('land');
+    if (n) {
+      combo++;
+      gained += 10 * n * n * Math.min(combo, 6);
+      clearEffects(rows, cols, cr, cc, n);
+      if (grid.every(row => row.every(v => !v))) {
+        gained += 300;
+        setTimeout(() => banner('완벽해요!', '보드 클리어 +300'), 250);
+      }
+      const label = n >= 4 ? '대박!' : n === 3 ? '트리플!' : n === 2 ? '더블!' : '';
+      if (label) banner(label, combo > 1 ? `콤보 x${combo}` : '');
+      else if (combo > 1) popup(`콤보 x${combo}`, cr - .8, cc, false);
+      popup(`+${gained}`, cr, cc, n >= 2);
+      boardEl.classList.toggle('combo', combo > 1);
+      sfx.clear(n, combo);
+    } else {
+      combo = 0;
+      boardEl.classList.remove('combo');
+      sfx.place();
+    }
+    addScore(gained);
+    const refill = tray.every(t => !t);
+    if (refill) newTray();
+    renderDock(refill);
+    if (!tray.some(t => t && anyFit(t.cells))) setTimeout(() => end('놓을 곳이 없어요'), 700);
+  }
+
+  function clearEffects(rows, cols, cr, cc, n) {
+    const m = cellMetrics();
+    const set = new Map();
+    rows.forEach(r => { for (let c=0;c<N;c++) set.set(r*N+c, true); });
+    cols.forEach(c => { for (let r=0;r<N;r++) set.set(r*N+c, true); });
+    // Ripple outward from where the piece landed.
+    set.forEach((_, k) => {
+      const r = Math.floor(k / N), c = k % N;
+      const delay = Math.round(Math.hypot(r + .5 - cr, c + .5 - cc) * 28);
+      fading.set(k, { color: grid[r][c], delay });
+      const color = cssColor(grid[r][c]);
+      setTimeout(() => burst(m.left + c * m.step + m.size / 2, m.top + r * m.step + m.size / 2, color, m.size, 5 + n), delay + 110);
+      grid[r][c] = null;
+    });
+    renderBoard();
+    setTimeout(() => {
+      set.forEach((_, k) => fading.delete(k));
+      if (!drag) renderBoard(); else renderBoard(drag.ghost, drag.ghost && linesIf(drag.ghost.cells, drag.ghost.r, drag.ghost.c));
+    }, 520 + 8 * 28);
+    // Light beams across each cleared line.
+    const b = boardEl.getBoundingClientRect(), pad = m.left - b.left;
+    const glowVar = n >= 2 ? '--c1' : '--c6';
+    rows.forEach((r, j) => addBeam('row', pad - 4, pad + r * m.step - 6, b.width - 2 * pad + 8, m.size + 12, j * 60, glowVar));
+    cols.forEach((c, j) => addBeam('col', pad + c * m.step - 6, pad - 4, m.size + 12, b.height - 2 * pad + 8, (rows.length + j) * 60, glowVar));
+    if (!reduceMotion) {
+      stage.classList.remove('shake1', 'shake2', 'shake3');
+      void stage.offsetWidth;
+      stage.classList.add('shake' + Math.min(3, n));
+    }
+  }
+  function addBeam(kind, left, top, width, height, delay, glowVar) {
+    const d = document.createElement('div');
+    d.className = 'beam ' + kind;
+    Object.assign(d.style, { left: left + 'px', top: top + 'px', width: width + 'px', height: height + 'px' });
+    d.style.setProperty('--d', delay + 'ms');
+    d.style.setProperty('--glow', `var(${glowVar})`);
+    if (kind === 'row') { d.style.setProperty('--sx0', '.1'); d.style.setProperty('--sy1', '.15'); }
+    else { d.style.setProperty('--sy0', '.1'); d.style.setProperty('--sx1', '.15'); }
+    boardEl.appendChild(d);
+    setTimeout(() => d.remove(), 500 + delay);
+  }
+
+  function popup(text, r, c, big) {
+    const d = document.createElement('div');
+    d.className = 'pop' + (big ? ' big' : '');
+    d.textContent = text;
+    d.style.left = Math.min(85, Math.max(15, c / N * 100)) + '%';
+    d.style.top = Math.min(90, Math.max(10, r / N * 100)) + '%';
+    boardEl.appendChild(d);
+    setTimeout(() => d.remove(), 1000);
+  }
+  function banner(text, sub) {
+    const d = document.createElement('div');
+    d.className = 'banner';
+    d.textContent = text;
+    if (sub) { const s = document.createElement('small'); s.textContent = sub; d.appendChild(s); }
+    stage.appendChild(d);
+    setTimeout(() => d.remove(), 1150);
+  }
+
+  /* ---------- Leaderboard ---------- */
+  // Shared ranking lives in the artifact's db: scores/<viewer id> = { best, plays, at }.
+  // Without db (saved copy, signed out) it falls back to this browser's own records.
+  const LB = { shared: false, readOnly: false, entries: [], me: null, myBest: 0, myPlays: 0, names: {}, colors: {}, db: null, user: null };
+  let local = [];
+  try { local = JSON.parse(localStorage.getItem('block90-local') || '[]'); } catch (e) {}
+  const nameOf = id => LB.names[id] || '플레이어';
+
+  // Fill these two in from Supabase (Project Settings > API). The anon key is meant to be public.
+  const SUPABASE_URL = 'https://nyhuqycbeaqkrmvqrzjw.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55aHVxeWNiZWFxa3JtdnFyemp3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4MzQ5NTYsImV4cCI6MjEwNzQxMDk1Nn0.0uclgqFSQIXfjXewYuV-UaqK40764OTdCCxSaUaIP_Y';
+  let playerId = null;
+  try { playerId = localStorage.getItem('block90-player'); } catch (e) {}
+  if (!playerId) {
+    playerId = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => (Math.random() * 16 | 0).toString(16)));
+    try { localStorage.setItem('block90-player', playerId); } catch (e) {}
+  }
+  const api = (path, opts = {}) => fetch(SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/' + path, {
+    ...opts, headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  async function refreshLB() {
+    const r = await api('scores?select=player,name,score&order=score.desc&limit=1000');
+    if (!r.ok) throw new Error('leaderboard ' + r.status);
+    const seen = new Set(), entries = [];
+    for (const row of await r.json()) {
+      if (seen.has(row.player)) continue;
+      seen.add(row.player); entries.push({ id: row.player, best: row.score }); LB.names[row.player] = row.name;
+    }
+    LB.entries = entries;
+    LB.myBest = (entries.find(e => e.id === playerId) || {}).best || 0;
+    if (LB.myBest > best) { best = LB.myBest; $('best').textContent = best; }
+    renderLB(); updateChase();
+  }
+  async function initLB() {
+    renderLB();
+    if (!SUPABASE_URL || !SUPABASE_KEY) return;
+    Object.assign(LB, { me: playerId, shared: true });
+    try { await refreshLB(); } catch (e) { LB.shared = false; renderLB(); return; }
+    setInterval(() => { if (!document.hidden) refreshLB().catch(() => {}); }, 15000);
+  }
+  let myNick = '';
+  function nickname() {
+    const el = $('nick');
+    if (!el) return myNick || '플레이어';
+    let n = (el && el.value || '').trim().slice(0, 12);
+    if (!n) { n = '플레이어' + Math.floor(1000 + Math.random() * 9000); if (el) el.value = n; }
+    try { localStorage.setItem('block90-nick', n); } catch (e) {}
+    myNick = n;
+    return n;
+  }
+
+  function rows() {
+    if (LB.shared) {
+      const list = LB.entries.slice();
+      if (LB.myBest > 0 && !list.some(e => e.id === LB.me)) list.push({ id: LB.me, best: LB.myBest });
+      list.sort((a, b) => b.best - a.best);
+      return list.map(e => ({ name: nameOf(e.id), color: LB.colors[e.id], best: e.best, me: e.id === LB.me }));
+    }
+    return local.map(e => {
+      const d = new Date(e.at);
+      return { name: `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`, best: e.s, me: false };
+    });
+  }
+
+  function renderLB() {
+    document.querySelectorAll('.lb').forEach(box => {
+      box.textContent = '';
+      const h = document.createElement('h3');
+      const t1 = document.createElement('span'); t1.textContent = LB.shared ? '전체 순위' : '이 브라우저 기록';
+      const t2 = document.createElement('span'); t2.textContent = 'TOP 5';
+      h.append(t1, t2); box.appendChild(h);
+      const all = rows();
+      if (!all.length) {
+        const e = document.createElement('div'); e.className = 'empty';
+        e.textContent = '아직 기록이 없어요. 첫 1위가 되어 보세요!';
+        box.appendChild(e); return;
+      }
+      const ol = document.createElement('ol');
+      const add = (r, i) => {
+        const li = document.createElement('li'); if (r.me) li.className = 'me';
+        const no = document.createElement('span'); no.className = 'no'; no.textContent = i + 1;
+        const dot = document.createElement('span'); dot.className = 'dot'; if (r.color) dot.style.setProperty('--pc', r.color);
+        const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = r.name + (r.me ? ' (나)' : '');
+        const sc = document.createElement('span'); sc.className = 'sc'; sc.textContent = r.best;
+        li.append(no, dot, nm, sc); ol.appendChild(li);
+      };
+      all.slice(0, 5).forEach(add);
+      const mi = all.findIndex(r => r.me);
+      if (mi >= 5) { const g = document.createElement('li'); g.className = 'gap'; g.textContent = '⋯'; ol.appendChild(g); add(all[mi], mi); }
+      box.appendChild(ol);
+      if (LB.shared && LB.readOnly) {
+        const n = document.createElement('div'); n.className = 'empty';
+        n.textContent = '보기 전용 권한이라 내 점수는 순위에 저장되지 않아요.';
+        box.appendChild(n);
+      }
+    });
+  }
+
+  // Live "who's next" line during play.
+  let chaseRank = null;
+  function updateChase() {
+    const el = $('chase');
+    if (!running) { el.textContent = ''; el.className = 'chase'; return; }
+    const rivals = LB.shared
+      ? LB.entries.filter(e => e.id !== LB.me).map(e => ({ name: nameOf(e.id), best: e.best }))
+      : (local.length ? [{ name: '내 최고 기록', best: local[0].s }] : []);
+    const above = rivals.filter(r => r.best >= score);
+    const rank = above.length + 1;
+    el.textContent = '';
+    const tag = document.createElement('span'); tag.className = 'tag';
+    const msg = document.createElement('span');
+    el.className = 'chase';
+    if (!rivals.length) {
+      tag.textContent = 'NEW'; msg.textContent = '첫 기록에 도전하세요';
+    } else if (!above.length) {
+      el.classList.add('top');
+      tag.textContent = LB.shared ? '1위' : '갱신';
+      msg.textContent = LB.shared ? '지금 1위예요! 끝까지 지키세요' : '최고 기록을 넘었어요!';
+    } else {
+      const next = above[above.length - 1], need = next.best - score + 1;
+      tag.textContent = LB.shared ? `${rank}위` : '도전';
+      const b = document.createElement('b'); b.textContent = next.name;
+      msg.append(b, document.createTextNode(`${LB.shared ? '님' : ''}까지 ${need}점`));
+      if (need <= 30) el.classList.add('hot');
+    }
+    el.append(tag, msg);
+    if (chaseRank !== null && rank < chaseRank && rivals.length) {
+      setTimeout(() => running && banner(LB.shared ? `${rank}위 진입!` : '기록 갱신!', rank === 1 && LB.shared ? '1위를 차지했어요' : ''), 500);
+    }
+    chaseRank = rank;
+  }
+
+  async function submitScore(s) {
+    if (s <= 0) return;
+    local.push({ s, at: Date.now() });
+    local.sort((a, b) => b.s - a.s); local = local.slice(0, 10);
+    try { localStorage.setItem('block90-local', JSON.stringify(local)); } catch (e) {}
+    if (!LB.shared) { renderLB(); return; }
+    try {
+      const r = await api('scores', { method: 'POST', body: JSON.stringify({ player: playerId, name: nickname(), score: s }), headers: { Prefer: 'return=minimal' } });
+      if (!r.ok) throw new Error('save ' + r.status);
+      await refreshLB();
+    } catch (e) { LB.saveFailed = true; renderLB(); }
+  }
+  function rankFor(s) {
+    if (LB.shared) return LB.entries.filter(e => e.id !== LB.me && e.best > s).length + 1;
+    return local.filter(e => e.s > s).length + 1;
+  }
+
+  let shown = 0, target = 0;
+  function addScore(n) {
+    score += n; target = score;
+    updateChase();
+    if (n >= 10) { const s = $('score'); s.classList.remove('bump'); void s.offsetWidth; s.classList.add('bump'); }
+  }
+  function fmt(t) { const s = Math.ceil(t); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; }
+
+  function tick(now) {
+    if (!running) return;
+    timeLeft = Math.max(0, timeLeft - (now - lastTick) / 1000);
+    lastTick = now;
+    $('time').textContent = fmt(timeLeft);
+    $('barFill').style.transform = `scaleX(${timeLeft / TIME})`;
+    const low = timeLeft <= 10;
+    $('timeBox').classList.toggle('low', low);
+    $('bar').classList.toggle('low', low);
+    if (shown < target) { shown = Math.min(target, shown + Math.max(1, Math.ceil((target - shown) / 6))); $('score').textContent = shown; }
+    if (timeLeft <= 0) { end('시간 종료'); return; }
+    raf = requestAnimationFrame(tick);
+  }
+
+  function start() {
+    nickname();
+    audio();
+    grid = Array.from({ length: N }, () => Array(N).fill(null));
+    fading.clear();
+    score = 0; combo = 0; shown = 0; target = 0; timeLeft = TIME;
+    $('score').textContent = 0;
+    boardEl.classList.remove('combo');
+    running = true;
+    chaseRank = null; updateChase();
+    newTray(); renderBoard(); renderDock(true);
+    overlay.hidden = true;
+    lastTick = performance.now();
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(tick);
+  }
+
+  let result = null; // the last finished game, kept on screen until the player restarts
+  function end(reason) {
+    if (!running) return;
+    running = false;
+    cancelAnimationFrame(raf);
+    if (drag) { drag.el.remove(); drag.slot.classList.remove('lift'); drag = null; document.body.classList.remove('dragging'); }
+    $('score').textContent = score;
+    sfx.over();
+    const isBest = score > best;
+    if (isBest) { best = score; $('best').textContent = best; try { localStorage.setItem('block90-best', best); } catch (e) {} }
+    result = { reason, score, isBest, used: Math.round(TIME - timeLeft), rank: rankFor(score) };
+    updateChase();
+    showResult(true);
+    submitScore(score).then(() => showSaveNote());
+    renderDock();
+  }
+
+  function showResult(guard) {
+    const r = result;
+    overlay.innerHTML = `<div>
+      <h2>${r.reason}</h2>
+      ${r.isBest && r.score > 0 ? '<div class="new">새 최고 점수!</div>' : ''}
+      <div class="big">${r.score}</div>
+      <p>${r.used}초 플레이 · 최고 ${best}점</p>
+      ${r.score > 0 ? `<div class="rank">${LB.shared ? '이번 점수는 전체' : '이 브라우저 기록 중'} <b>${r.rank}위</b></div>` : ''}
+      <button class="btn" id="againBtn">다시 하기</button>
+      <div class="lb" id="lbEnd"></div></div>`;
+    overlay.hidden = false;
+    renderLB();
+    showSaveNote();
+    const btn = $('againBtn');
+    // Ignore clicks for a moment so a click meant for the board can't restart the game.
+    if (guard) { btn.disabled = true; btn.style.opacity = '.5'; setTimeout(() => { btn.disabled = false; btn.style.opacity = ''; }, 900); }
+    btn.addEventListener('click', start);
+  }
+
+  function showSaveNote() {
+    const btn = $('againBtn');
+    if (!btn || !result || result.score <= 0 || !LB.shared || !LB.readOnly || overlay.querySelector('.saveNote')) return;
+    const n = document.createElement('p'); n.className = 'saveNote';
+    n.textContent = '보기 전용으로 들어와서 이 기록은 전체 순위에 저장되지 않았어요.';
+    btn.before(n);
+  }
+
+  // Keep the game (or the result screen) when the page is updated while open.
+  const hot = window.claude && window.claude.hot;
+  try { hot && hot.snapshot && hot.snapshot(() => ({ v: 1, grid, tray, score, combo, timeLeft, running, result })); } catch (e) {}
+
+  function boot(data) {
+    try { $('nick').value = localStorage.getItem('block90-nick') || ''; } catch (e) {}
+    $('startBtn').addEventListener('click', start);
+    initLB();
+    window.addEventListener('resize', () => { sizeFx(); renderDock(); });
+    if (data && data.v === 1 && data.grid) {
+      grid = data.grid; tray = data.tray; score = data.score || 0; combo = data.combo || 0;
+      timeLeft = data.timeLeft; shown = target = score; result = data.result || null;
+      $('score').textContent = score;
+      $('time').textContent = fmt(timeLeft); $('barFill').style.transform = `scaleX(${timeLeft / TIME})`;
+      renderBoard();
+      if (data.running && timeLeft > 0) {
+        running = true; overlay.hidden = true; renderDock(); chaseRank = null; updateChase();
+        lastTick = performance.now(); raf = requestAnimationFrame(tick);
+        return;
+      }
+      renderDock();
+      if (result) { showResult(false); return; }
+    }
+    // Attract state: a sample board behind the start screen.
+    grid = Array.from({ length: N }, () => Array(N).fill(null));
+    [[7,0,'--c3'],[7,1,'--c3'],[7,2,'--c3'],[7,3,'--c2'],[7,4,'--c2'],[7,6,'--c0'],[7,7,'--c0'],[6,0,'--c4'],[6,1,'--c4'],[6,6,'--c0'],[5,0,'--c4'],[6,4,'--c1'],[5,4,'--c1'],[6,3,'--c2']]
+      .forEach(([r,c,v]) => grid[r][c] = v);
+    renderBoard();
+    tray = [{ cells: [[0,0],[0,1],[1,0],[1,1]], color: '--c5' }, { cells: [[0,0],[1,0],[1,1]], color: '--c1' }, { cells: [[0,0],[0,1],[0,2]], color: '--c6' }];
+    renderDock();
+  }
+  if (hot && hot.ready) hot.ready(boot); else boot(hot && hot.data);
+})();
+</script>
+</body>
+</html>
