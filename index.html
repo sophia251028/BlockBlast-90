@@ -830,8 +830,10 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     if (!running) { el.textContent = ''; el.className = 'chase'; return; }
     const rivals = LB.shared
       ? LB.entries.filter(e => e.id !== LB.me).map(e => ({ name: nameOf(e.id), best: e.best }))
-      : (local.length ? [{ name: '내 최고 기록', best: local[0].s }] : []);
-    const above = rivals.filter(r => r.best >= score);
+          // Your own earlier best counts too: beating other players isn't 1st place if you once scored higher.
+          .concat(LB.myBest > 0 ? [{ name: '내 최고 기록', best: LB.myBest, mine: true }] : [])
+      : (local.length ? [{ name: '내 최고 기록', best: local[0].s, mine: true }] : []);
+    const above = rivals.filter(r => r.best >= score).sort((a, b) => b.best - a.best);
     const rank = above.length + 1;
     el.textContent = '';
     const tag = document.createElement('span'); tag.className = 'tag';
@@ -847,7 +849,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
       const next = above[above.length - 1], need = next.best - score + 1;
       tag.textContent = LB.shared ? `${rank}위` : '도전';
       const b = document.createElement('b'); b.textContent = next.name;
-      msg.append(b, document.createTextNode(`${LB.shared ? '님' : ''}까지 ${need}점`));
+      msg.append(b, document.createTextNode(`${LB.shared && !next.mine ? '님' : ''}까지 ${need}점`));
       if (need <= 30) el.classList.add('hot');
     }
     el.append(tag, msg);
@@ -871,7 +873,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     } catch (e) { LB.saveFailed = true; renderLB(); }
   }
   function rankFor(s) {
-    if (LB.shared) return LB.entries.filter(e => e.id !== LB.me && e.best > s).length + 1;
+    if (LB.shared) return LB.entries.filter(e => e.id !== LB.me && e.best > s).length + (LB.myBest > s ? 1 : 0) + 1;
     return local.filter(e => e.s > s).length + 1;
   }
 
