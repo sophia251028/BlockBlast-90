@@ -143,12 +143,21 @@ h1 span { color: var(--accent); }
 .slot.lift .piece { visibility: hidden; }
 
 .drag {
-  position: fixed; left: 0; top: 0; display: grid; pointer-events: none; z-index: 20;
-  filter: drop-shadow(0 12px 14px rgba(0,0,0,.35)); transition: scale .14s ease-out;
-  will-change: translate;
+  position: fixed; left: 0; top: 0; display: grid; pointer-events: none; z-index: 40;
+  transform-origin: 0 0; will-change: transform; backface-visibility: hidden;
 }
-.drag.back { transition: translate .18s ease-in, scale .18s ease-in; }
-.drag .pc, .drag .pe { width: var(--s); height: var(--s); border-radius: 4px; }
+.drag.back { transition: transform .18s ease-in; }
+.drag .pc, .drag .pe { border-radius: 4px; }
+.drag .pc { box-shadow: inset 0 -4px 0 rgba(0,0,0,.22), inset 0 3px 0 rgba(255,255,255,.35), 0 8px 14px rgba(0,0,0,.28); }
+.modes { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.1); margin: 0 0 8px; }
+.modes button {
+  font: 16px var(--ko-display); color: #c9d2e4; background: transparent; border: 0; border-radius: 999px;
+  padding: 7px 16px; cursor: pointer;
+}
+.modes button[aria-pressed="true"] { background: #fff; color: var(--board); }
+.modes button:focus-visible { outline: 2px solid var(--c1); outline-offset: 2px; }
+.modeDesc { font-size: 13px; color: #9fb0cc; margin: 0 0 12px; }
+.linkBtn { display: block; margin: 12px auto 0; font: 14px var(--body); color: #c9d2e4; background: none; border: 0; text-decoration: underline; cursor: pointer; }
 body.dragging, body.dragging * { cursor: grabbing !important; }
 
 #fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 30; }
@@ -211,7 +220,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 
 <div class="app">
   <header>
-    <h1>BLOCK <span>90</span></h1>
+    <h1>BLOCK <span id="modeMark">90</span></h1>
     <div class="meta">
       <div class="best">최고 점수 <b id="best">0</b></div>
       <button class="sound" id="soundBtn" type="button" aria-pressed="true">소리 켬</button>
@@ -219,7 +228,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
   </header>
   <div class="hud">
     <div><div class="label">점수</div><div class="score" id="score">0</div></div>
-    <div class="time" id="timeBox"><div class="label">남은 시간</div><div class="num" id="time">1:30</div></div>
+    <div class="time" id="timeBox"><div class="label" id="timeLabel">남은 시간</div><div class="num" id="time">1:30</div></div>
     <div class="bar" id="bar"><i id="barFill"></i></div>
     <div class="chase" id="chase" aria-live="polite"></div>
   </div>
@@ -227,8 +236,10 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     <div class="board" id="board"></div>
     <div class="overlay" id="overlay">
       <div>
-        <h2>90초 블록 블라스트</h2>
-        <p>블록을 끌어다 가로줄이나 세로줄을 채우세요.<br>여러 줄, 연속 콤보는 보너스!</p>
+        <h2>블록 블라스트</h2>
+        <p>블록을 끌거나 클릭해서 옮겨 줄을 채우세요.</p>
+        <div class="modes" role="group" aria-label="게임 모드"><button type="button" data-mode="timed">90초 모드</button><button type="button" data-mode="endless">무제한 모드</button></div>
+        <div class="modeDesc" id="modeDesc"></div>
         <label class="nickrow" for="nick">닉네임 <input id="nick" maxlength="12" autocomplete="nickname" placeholder="순위에 표시될 이름"></label>
         <button class="btn" id="startBtn">시작</button>
         <div class="lb" id="lbStart"></div>
@@ -443,6 +454,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     const first = cells[0].getBoundingClientRect(), second = cells[1].getBoundingClientRect();
     return { left: first.left, top: first.top, step: second.left - first.left, size: first.width };
   }
+  // Drag or click-to-carry. The piece grows from the tray to board size around the grabbed
+  // point, and settles exactly onto the cells it will fill while over a valid spot.
   function startDrag(e, i, slot) {
     if (!running || !tray[i] || drag || e.button > 0) return;
     e.preventDefault();
@@ -451,23 +464,34 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     const [h, w] = dims(p.cells);
     const W = w * m.step - gap, H = h * m.step - gap;
     const src = slot.querySelector('.piece').getBoundingClientRect();
-    // Where inside the piece the pointer grabbed it (0..1), so it doesn't jump.
     const touch = e.pointerType === 'touch';
     const fx = touch ? .5 : Math.min(1, Math.max(0, (e.clientX - src.left) / src.width));
     const fy = touch ? 1 : Math.min(1, Math.max(0, (e.clientY - src.top) / src.height));
     const el = pieceEl(p, m.size, gap);
     el.className = 'drag';
-    el.style.transformOrigin = `${fx * 100}% ${fy * 100}%`;
-    el.style.scale = String(src.width / W);
+    el.querySelectorAll('.pc, .pe').forEach(c => { c.style.width = m.size + 'px'; c.style.height = m.size + 'px'; });
     document.body.appendChild(el);
-    const lift = touch ? m.step * 1.4 : 0;
-    drag = { i, p, el, slot, W, H, fx, fy, m, lift, ghost: null, key: '' };
+    drag = { i, p, el, slot, W, H, fx, fy, m, lift: touch ? m.step * 1.4 : 0, ghost: null, key: '',
+      scale: src.width / W, cx: e.clientX, cy: e.clientY, x: src.left, y: src.top,
+      sx: e.clientX, sy: e.clientY, t0: performance.now(), sticky: false, raf: 0 };
     slot.classList.add('lift');
     document.body.classList.add('dragging');
-    try { slot.setPointerCapture(e.pointerId); } catch (err) {}
     moveDrag(e);
-    requestAnimationFrame(() => { if (drag && drag.el === el) el.style.scale = '1'; });
+    dragFrame();
     sfx.pick();
+  }
+  function dragFrame() {
+    const d = drag;
+    if (!d) return;
+    d.scale += (1 - d.scale) * .35;
+    if (Math.abs(1 - d.scale) < .01) d.scale = 1;
+    let tx, ty;
+    if (d.ghost) { tx = d.m.left + d.ghost.c * d.m.step; ty = d.m.top + d.ghost.r * d.m.step; }
+    else { tx = d.cx - d.fx * d.W * d.scale; ty = d.cy - d.fy * d.H * d.scale - d.lift; }
+    const k = d.ghost ? .5 : .8;
+    d.x += (tx - d.x) * k; d.y += (ty - d.y) * k;
+    d.el.style.transform = `translate3d(${d.x.toFixed(1)}px, ${d.y.toFixed(1)}px, 0) scale(${d.scale.toFixed(3)})`;
+    d.raf = requestAnimationFrame(dragFrame);
   }
   function findSpot(cellsOf, fr, fc) {
     // fr/fc: fractional grid position of the piece's top-left corner.
@@ -484,23 +508,25 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     return bestSpot;
   }
   function moveDrag(e) {
-    if (!drag) return;
-    const { el, W, H, fx, fy, m, lift } = drag;
+    const d = drag;
+    if (!d) return;
+    d.cx = e.clientX; d.cy = e.clientY;
+    const { W, H, fx, fy, m, lift } = d;
     const x = e.clientX - fx * W, y = e.clientY - fy * H - lift;
-    el.style.translate = `${x}px ${y}px`;
-    drag.x = x; drag.y = y;
-    const spot = findSpot(drag.p.cells, (y - m.top) / m.step, (x - m.left) / m.step);
+    const spot = findSpot(d.p.cells, (y - m.top) / m.step, (x - m.left) / m.step);
     const key = spot ? spot.r + ',' + spot.c : '';
-    if (key === drag.key) return;
-    drag.key = key;
+    if (key === d.key) return;
+    d.key = key;
     if (spot) {
-      drag.ghost = { cells: drag.p.cells, r: spot.r, c: spot.c, color: drag.p.color };
-      renderBoard(drag.ghost, linesIf(drag.p.cells, spot.r, spot.c));
-    } else { drag.ghost = null; renderBoard(); }
+      d.ghost = { cells: d.p.cells, r: spot.r, c: spot.c, color: d.p.color };
+      renderBoard(d.ghost, linesIf(d.p.cells, spot.r, spot.c));
+    } else { d.ghost = null; renderBoard(); }
   }
-  function endDrag() {
-    if (!drag) return;
-    const d = drag; drag = null;
+  function finishDrag() {
+    const d = drag;
+    if (!d) return;
+    drag = null;
+    cancelAnimationFrame(d.raf);
     document.body.classList.remove('dragging');
     if (d.ghost && running) {
       d.el.remove(); d.slot.classList.remove('lift');
@@ -511,15 +537,32 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     renderBoard();
     sfx.back();
     const src = d.slot.getBoundingClientRect();
+    const sc = Math.min(1, (src.width - 24) / d.W, (src.height - 24) / d.H);
     d.el.classList.add('back');
-    d.el.style.transformOrigin = '50% 50%';
-    d.el.style.translate = `${src.left + src.width / 2 - d.W / 2}px ${src.top + src.height / 2 - d.H / 2}px`;
-    d.el.style.scale = String(Math.min(1, (src.width - 24) / d.W, (src.height - 24) / d.H));
+    d.el.style.transform = `translate3d(${src.left + src.width / 2 - d.W * sc / 2}px, ${src.top + src.height / 2 - d.H * sc / 2}px, 0) scale(${sc})`;
     setTimeout(() => { d.el.remove(); d.slot.classList.remove('lift'); }, 190);
   }
+  function cancelDrag() { if (drag) { drag.ghost = null; finishDrag(); } }
+  function dropDrag() { if (drag) { cancelAnimationFrame(drag.raf); drag.el.remove(); drag.slot.classList.remove('lift'); drag = null; document.body.classList.remove('dragging'); } }
   window.addEventListener('pointermove', moveDrag);
-  window.addEventListener('pointerup', endDrag);
-  window.addEventListener('pointercancel', endDrag);
+  window.addEventListener('pointerup', e => {
+    const d = drag;
+    if (!d || d.sticky) return;
+    // A quick click picks the piece up; it follows the cursor until the next click.
+    if (performance.now() - d.t0 < 350 && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 8) { d.sticky = true; return; }
+    finishDrag();
+  });
+  window.addEventListener('pointerdown', e => {
+    if (!drag || !drag.sticky) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.button > 0) { cancelDrag(); return; }
+    moveDrag(e);
+    finishDrag();
+  }, true);
+  window.addEventListener('pointercancel', cancelDrag);
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') cancelDrag(); });
+  window.addEventListener('contextmenu', e => { if (drag) e.preventDefault(); });
+  window.addEventListener('blur', cancelDrag);
 
   function linesIf(s, r0, c0) {
     const g = grid.map(row => row.slice());
@@ -632,7 +675,34 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
   // Without db (saved copy, signed out) it falls back to this browser's own records.
   const LB = { shared: false, readOnly: false, entries: [], me: null, myBest: 0, myPlays: 0, names: {}, colors: {}, db: null, user: null };
   let local = [];
-  try { local = JSON.parse(localStorage.getItem('block90-local') || '[]'); } catch (e) {}
+  let mode = 'timed', elapsed = 0;
+  try { if (localStorage.getItem('block90-mode') === 'endless') mode = 'endless'; } catch (e) {}
+  const MODE_NAME = { timed: '90초', endless: '무제한' };
+  const MODE_DESC = { timed: '90초 안에 최대한 많은 점수를 내세요.', endless: '시간 제한 없이, 놓을 곳이 없을 때까지 계속해요.' };
+  const sfxKey = k => mode === 'timed' ? 'block90-' + k : 'block90-' + k + '-endless';
+  function loadModeRecords() {
+    best = 0; local = [];
+    try { best = +localStorage.getItem(sfxKey('best')) || 0; local = JSON.parse(localStorage.getItem(sfxKey('local')) || '[]'); } catch (e) {}
+    $('best').textContent = best;
+  }
+  function updateHudMode() {
+    const timed = mode === 'timed';
+    $('timeLabel').textContent = timed ? '남은 시간' : '플레이 시간';
+    $('time').textContent = timed ? fmt(running ? timeLeft : TIME) : fmtUp(running ? elapsed : 0);
+    $('bar').hidden = !timed;
+    $('modeMark').textContent = timed ? '90' : '∞';
+    document.querySelectorAll('.modes [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === mode));
+    const md = $('modeDesc'); if (md) md.textContent = MODE_DESC[mode];
+  }
+  function setMode(m) {
+    if (running || m === mode) return;
+    mode = m;
+    try { localStorage.setItem('block90-mode', mode); } catch (e) {}
+    loadModeRecords();
+    LB.entries = []; LB.myBest = 0;
+    updateHudMode(); renderLB();
+    if (LB.shared) refreshLB().catch(() => {});
+  }
   const nameOf = id => LB.names[id] || '플레이어';
 
   // Fill these two in from Supabase (Project Settings > API). The anon key is meant to be public.
@@ -648,10 +718,13 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     ...opts, headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', ...(opts.headers || {}) },
   });
   async function refreshLB() {
-    const r = await api('scores?select=player,name,score&order=score.desc&limit=1000');
+    const m = mode;
+    const r = await api(`scores?select=player,name,score&mode=eq.${m}&order=score.desc&limit=1000`);
     if (!r.ok) throw new Error('leaderboard ' + r.status);
+    const list = await r.json();
+    if (m !== mode) return; // the player switched modes while this was loading
     const seen = new Set(), entries = [];
-    for (const row of await r.json()) {
+    for (const row of list) {
       if (seen.has(row.player)) continue;
       seen.add(row.player); entries.push({ id: row.player, best: row.score }); LB.names[row.player] = row.name;
     }
@@ -695,7 +768,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     document.querySelectorAll('.lb').forEach(box => {
       box.textContent = '';
       const h = document.createElement('h3');
-      const t1 = document.createElement('span'); t1.textContent = LB.shared ? '전체 순위' : '이 브라우저 기록';
+      const t1 = document.createElement('span'); t1.textContent = `${MODE_NAME[mode]} 모드 · ${LB.shared ? '전체 순위' : '이 브라우저 기록'}`;
       const t2 = document.createElement('span'); t2.textContent = 'TOP 5';
       h.append(t1, t2); box.appendChild(h);
       const all = rows();
@@ -763,12 +836,13 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     if (s <= 0) return;
     local.push({ s, at: Date.now() });
     local.sort((a, b) => b.s - a.s); local = local.slice(0, 10);
-    try { localStorage.setItem('block90-local', JSON.stringify(local)); } catch (e) {}
+    try { localStorage.setItem(sfxKey('local'), JSON.stringify(local)); } catch (e) {}
     if (!LB.shared) { renderLB(); return; }
     try {
-      const r = await api('scores', { method: 'POST', body: JSON.stringify({ player: playerId, name: nickname(), score: s }), headers: { Prefer: 'return=minimal' } });
+      const m = mode;
+    const r = await api('scores', { method: 'POST', body: JSON.stringify({ player: playerId, name: nickname(), score: s, mode }), headers: { Prefer: 'return=minimal' } });
       if (!r.ok) throw new Error('save ' + r.status);
-      await refreshLB();
+      if (m === mode) await refreshLB();
     } catch (e) { LB.saveFailed = true; renderLB(); }
   }
   function rankFor(s) {
@@ -783,11 +857,21 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     if (n >= 10) { const s = $('score'); s.classList.remove('bump'); void s.offsetWidth; s.classList.add('bump'); }
   }
   function fmt(t) { const s = Math.ceil(t); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; }
+  function fmtUp(t) { const s = Math.floor(t); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; }
+  const fmtUsed = s => s < 60 ? `${s}초` : `${Math.floor(s / 60)}분 ${s % 60}초`;
 
   function tick(now) {
     if (!running) return;
-    timeLeft = Math.max(0, timeLeft - (now - lastTick) / 1000);
+    const dt = Math.min(.25, (now - lastTick) / 1000);
     lastTick = now;
+    if (mode === 'endless') {
+      elapsed += dt;
+      $('time').textContent = fmtUp(elapsed);
+      if (shown < target) { shown = Math.min(target, shown + Math.max(1, Math.ceil((target - shown) / 6))); $('score').textContent = shown; }
+      raf = requestAnimationFrame(tick);
+      return;
+    }
+    timeLeft = Math.max(0, timeLeft - dt);
     $('time').textContent = fmt(timeLeft);
     $('barFill').style.transform = `scaleX(${timeLeft / TIME})`;
     const low = timeLeft <= 10;
@@ -803,10 +887,12 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     audio();
     grid = Array.from({ length: N }, () => Array(N).fill(null));
     fading.clear();
-    score = 0; combo = 0; shown = 0; target = 0; timeLeft = TIME;
+    score = 0; combo = 0; shown = 0; target = 0; timeLeft = TIME; elapsed = 0;
+    $('timeBox').classList.remove('low'); $('bar').classList.remove('low');
     $('score').textContent = 0;
     boardEl.classList.remove('combo');
     running = true;
+    updateHudMode();
     chaseRank = null; updateChase();
     newTray(); renderBoard(); renderDock(true);
     overlay.hidden = true;
@@ -820,12 +906,12 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     if (!running) return;
     running = false;
     cancelAnimationFrame(raf);
-    if (drag) { drag.el.remove(); drag.slot.classList.remove('lift'); drag = null; document.body.classList.remove('dragging'); }
+    dropDrag();
     $('score').textContent = score;
     sfx.over();
     const isBest = score > best;
-    if (isBest) { best = score; $('best').textContent = best; try { localStorage.setItem('block90-best', best); } catch (e) {} }
-    result = { reason, score, isBest, used: Math.round(TIME - timeLeft), rank: rankFor(score) };
+    if (isBest) { best = score; $('best').textContent = best; try { localStorage.setItem(sfxKey('best'), best); } catch (e) {} }
+    result = { reason, score, isBest, mode, used: mode === 'timed' ? Math.round(TIME - timeLeft) : Math.floor(elapsed), rank: rankFor(score) };
     updateChase();
     showResult(true);
     submitScore(score).then(() => showSaveNote());
@@ -838,9 +924,10 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
       <h2>${r.reason}</h2>
       ${r.isBest && r.score > 0 ? '<div class="new">새 최고 점수!</div>' : ''}
       <div class="big">${r.score}</div>
-      <p>${r.used}초 플레이 · 최고 ${best}점</p>
+      <p>${MODE_NAME[r.mode || mode]} 모드 · ${fmtUsed(r.used)} 플레이 · 최고 ${best}점</p>
       ${r.score > 0 ? `<div class="rank">${LB.shared ? '이번 점수는 전체' : '이 브라우저 기록 중'} <b>${r.rank}위</b></div>` : ''}
       <button class="btn" id="againBtn">다시 하기</button>
+      <button class="linkBtn" id="modeBtn" type="button">모드 바꾸기</button>
       <div class="lb" id="lbEnd"></div></div>`;
     overlay.hidden = false;
     renderLB();
@@ -849,6 +936,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     // Ignore clicks for a moment so a click meant for the board can't restart the game.
     if (guard) { btn.disabled = true; btn.style.opacity = '.5'; setTimeout(() => { btn.disabled = false; btn.style.opacity = ''; }, 900); }
     btn.addEventListener('click', start);
+    $('modeBtn').addEventListener('click', showStart);
   }
 
   function showSaveNote() {
@@ -863,9 +951,23 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
   const hot = window.claude && window.claude.hot;
   try { hot && hot.snapshot && hot.snapshot(() => ({ v: 1, grid, tray, score, combo, timeLeft, running, result })); } catch (e) {}
 
-  function boot(data) {
-    try { $('nick').value = localStorage.getItem('block90-nick') || ''; } catch (e) {}
+  const startTpl = overlay.innerHTML;
+  function bindStart() {
+    try { $('nick').value = myNick || localStorage.getItem('block90-nick') || ''; } catch (e) {}
     $('startBtn').addEventListener('click', start);
+    updateHudMode(); renderLB();
+  }
+  function showStart() {
+    result = null;
+    overlay.innerHTML = startTpl;
+    overlay.hidden = false;
+    bindStart();
+  }
+  overlay.addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if (b) setMode(b.dataset.mode); });
+
+  function boot(data) {
+    loadModeRecords();
+    bindStart();
     initLB();
     window.addEventListener('resize', () => { sizeFx(); renderDock(); });
     if (data && data.v === 1 && data.grid) {
