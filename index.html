@@ -88,8 +88,10 @@ h1 span { color: var(--accent); }
 .cell.g { background: var(--col); opacity: .5; }
 .cell.hl { filter: brightness(1.35) saturate(1.2); box-shadow: 0 0 0 2px #fff inset, 0 0 10px rgba(255,255,255,.6); }
 .cell:not(.f):not(.g).hl { background: color-mix(in srgb, var(--hlc) 45%, var(--well)); }
-.cell.land { animation: land .2s ease-out; }
-@keyframes land { 0% { transform: scale(1.18); filter: brightness(1.5); } 100% { transform: scale(1); } }
+.cell.land { animation: land .3s cubic-bezier(.3,1.6,.5,1); }
+@keyframes land { 0% { transform: scale(1.12); filter: brightness(1.7); } 45% { transform: scale(.9); filter: brightness(1.2); } 100% { transform: scale(1); } }
+.board.thump { animation: thump .18s ease-out; }
+@keyframes thump { 40% { transform: translateY(3px) scale(.995); } }
 .cell.boom { animation: boom .42s cubic-bezier(.3,.6,.4,1) forwards; animation-delay: var(--d, 0ms); z-index: 2; }
 @keyframes boom {
   0% { transform: scale(1); filter: brightness(1); }
@@ -147,6 +149,7 @@ h1 span { color: var(--accent); }
   transform-origin: 0 0; will-change: transform; backface-visibility: hidden;
 }
 .drag.back { transition: transform .18s ease-in; }
+.drag.slam { transition: transform .085s cubic-bezier(.5,0,1,1); }
 .drag .pc, .drag .pe { border-radius: 4px; }
 .drag .pc { box-shadow: inset 0 -4px 0 rgba(0,0,0,.22), inset 0 3px 0 rgba(255,255,255,.35), 0 8px 14px rgba(0,0,0,.28); }
 .modes { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.1); margin: 0 0 8px; }
@@ -359,6 +362,16 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     }
     if (!fxRaf) fxRaf = requestAnimationFrame(stepFx);
   }
+  function puff(x, y, color, size) {
+    if (reduceMotion) return;
+    for (let i = 0; i < 4; i++) {
+      const dir = i % 2 ? 1 : -1;
+      parts.push({ x, y, vx: dir * (1 + Math.random() * 2.5), vy: -1 - Math.random() * 2, s: size * (.1 + Math.random() * .12),
+        r: Math.random() * 6, vr: (Math.random() - .5) * .3, life: .8, decay: .04 + Math.random() * .03,
+        color: Math.random() < .5 ? '#ffffff' : color });
+    }
+    if (!fxRaf) fxRaf = requestAnimationFrame(stepFx);
+  }
   function stepFx() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, innerWidth, innerHeight);
@@ -442,6 +455,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
       slot.appendChild(pieceEl(p, size, 2));
       if (running && !anyFit(p.cells)) slot.classList.add('dead');
       slot.addEventListener('pointerdown', e => startDrag(e, i, slot));
+      if (drag && drag.i === i) { slot.classList.add('lift'); drag.slot = slot; }
       dockEl.appendChild(slot);
     });
   }
@@ -449,15 +463,17 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
   /* ---------- Drag and drop ---------- */
   // The piece keeps the exact point you grabbed under the cursor, grows to board size,
   // and snaps to the nearest open spot within one cell of where it hovers.
-  let drag = null;
+  let drag = null, settling = false;
   function cellMetrics() {
-    const first = cells[0].getBoundingClientRect(), second = cells[1].getBoundingClientRect();
-    return { left: first.left, top: first.top, step: second.left - first.left, size: first.width };
+    // Measure from layout (offset*), not from the cells' boxes: a cell that is mid-animation
+    // (landing bounce, clear burst) is scaled, which would stretch the gaps in a carried piece.
+    const b = boardEl.getBoundingClientRect(), a = cells[0], z = cells[1];
+    return { left: b.left + a.offsetLeft, top: b.top + a.offsetTop, step: z.offsetLeft - a.offsetLeft, size: a.offsetWidth };
   }
   // Drag or click-to-carry. The piece grows from the tray to board size around the grabbed
-  // point, and settles exactly onto the cells it will fill while over a valid spot.
+  // point and stays under the pointer; on drop it slams into the cells it fills.
   function startDrag(e, i, slot) {
-    if (!running || !tray[i] || drag || e.button > 0) return;
+    if (!running || !tray[i] || drag || settling || e.button > 0) return;
     e.preventDefault();
     const p = tray[i], m = cellMetrics();
     const gap = m.step - m.size;
@@ -485,11 +501,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     if (!d) return;
     d.scale += (1 - d.scale) * .35;
     if (Math.abs(1 - d.scale) < .01) d.scale = 1;
-    let tx, ty;
-    if (d.ghost) { tx = d.m.left + d.ghost.c * d.m.step; ty = d.m.top + d.ghost.r * d.m.step; }
-    else { tx = d.cx - d.fx * d.W * d.scale; ty = d.cy - d.fy * d.H * d.scale - d.lift; }
-    const k = d.ghost ? .5 : .8;
-    d.x += (tx - d.x) * k; d.y += (ty - d.y) * k;
+    const tx = d.cx - d.fx * d.W * d.scale, ty = d.cy - d.fy * d.H * d.scale - d.lift;
+    d.x += (tx - d.x) * .85; d.y += (ty - d.y) * .85;
     d.el.style.transform = `translate3d(${d.x.toFixed(1)}px, ${d.y.toFixed(1)}px, 0) scale(${d.scale.toFixed(3)})`;
     d.raf = requestAnimationFrame(dragFrame);
   }
@@ -498,14 +511,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     const r0 = Math.round(fr), c0 = Math.round(fc);
     const [h, w] = dims(cellsOf);
     if (fr < -h * .6 || fc < -w * .6 || fr > N - h * .4 || fc > N - w * .4) return null;
-    let bestSpot = null, bestD = Infinity;
-    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-      const r = r0 + dr, c = c0 + dc;
-      if (!fits(cellsOf, r, c)) continue;
-      const d = (r - fr) ** 2 + (c - fc) ** 2;
-      if (d < bestD && d < 1.1) { bestD = d; bestSpot = { r, c }; }
-    }
-    return bestSpot;
+    return fits(cellsOf, r0, c0) ? { r: r0, c: c0 } : null;
   }
   function moveDrag(e) {
     const d = drag;
@@ -529,8 +535,16 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     cancelAnimationFrame(d.raf);
     document.body.classList.remove('dragging');
     if (d.ghost && running) {
-      d.el.remove(); d.slot.classList.remove('lift');
-      place(d.i, d.ghost.r, d.ghost.c);
+      const g = d.ghost;
+      settling = true;
+      d.el.classList.add('slam');
+      d.el.style.transform = `translate3d(${d.m.left + g.c * d.m.step}px, ${d.m.top + g.r * d.m.step}px, 0) scale(1)`;
+      setTimeout(() => {
+        settling = false;
+        d.el.remove(); d.slot.classList.remove('lift');
+        if (running && tray[d.i] === d.p && fits(d.p.cells, g.r, g.c)) { place(d.i, g.r, g.c); landFx(d.p, g.r, g.c); }
+        else renderBoard();
+      }, 85);
       return;
     }
     // Not droppable: glide back to the tray.
@@ -540,7 +554,18 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     const sc = Math.min(1, (src.width - 24) / d.W, (src.height - 24) / d.H);
     d.el.classList.add('back');
     d.el.style.transform = `translate3d(${src.left + src.width / 2 - d.W * sc / 2}px, ${src.top + src.height / 2 - d.H * sc / 2}px, 0) scale(${sc})`;
-    setTimeout(() => { d.el.remove(); d.slot.classList.remove('lift'); }, 190);
+    setTimeout(() => { d.el.remove(); if (!drag || drag.slot !== d.slot) d.slot.classList.remove('lift'); }, 190);
+  }
+  function landFx(p, r0, c0) {
+    const m = cellMetrics(), color = cssColor(p.color);
+    // Dust puffs out from the piece's bottom edge.
+    const bottom = {};
+    for (const [r, c] of p.cells) bottom[c] = Math.max(bottom[c] ?? -1, r);
+    for (const c in bottom) {
+      const x = m.left + (c0 + +c) * m.step + m.size / 2, y = m.top + (r0 + bottom[c]) * m.step + m.size;
+      puff(x, y, color, m.size);
+    }
+    if (!reduceMotion) { boardEl.classList.remove('thump'); void boardEl.offsetWidth; boardEl.classList.add('thump'); }
   }
   function cancelDrag() { if (drag) { drag.ghost = null; finishDrag(); } }
   function dropDrag() { if (drag) { cancelAnimationFrame(drag.raf); drag.el.remove(); drag.slot.classList.remove('lift'); drag = null; document.body.classList.remove('dragging'); } }
@@ -549,7 +574,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     const d = drag;
     if (!d || d.sticky) return;
     // A quick click picks the piece up; it follows the cursor until the next click.
-    if (performance.now() - d.t0 < 350 && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 8) { d.sticky = true; return; }
+    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 10) { d.sticky = true; return; }
     finishDrag();
   });
   window.addEventListener('pointerdown', e => {
@@ -687,8 +712,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
   }
   function updateHudMode() {
     const timed = mode === 'timed';
-    $('timeLabel').textContent = timed ? '남은 시간' : '플레이 시간';
-    $('time').textContent = timed ? fmt(running ? timeLeft : TIME) : fmtUp(running ? elapsed : 0);
+    $('time').textContent = fmt(running ? timeLeft : TIME);
+    $('timeBox').hidden = !timed;
     $('bar').hidden = !timed;
     $('modeMark').textContent = timed ? '90' : '∞';
     document.querySelectorAll('.modes [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === mode));
@@ -866,7 +891,6 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     lastTick = now;
     if (mode === 'endless') {
       elapsed += dt;
-      $('time').textContent = fmtUp(elapsed);
       if (shown < target) { shown = Math.min(target, shown + Math.max(1, Math.ceil((target - shown) / 6))); $('score').textContent = shown; }
       raf = requestAnimationFrame(tick);
       return;
@@ -924,7 +948,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
       <h2>${r.reason}</h2>
       ${r.isBest && r.score > 0 ? '<div class="new">새 최고 점수!</div>' : ''}
       <div class="big">${r.score}</div>
-      <p>${MODE_NAME[r.mode || mode]} 모드 · ${fmtUsed(r.used)} 플레이 · 최고 ${best}점</p>
+      <p>${MODE_NAME[r.mode || mode]} 모드 · ${(r.mode || mode) === 'timed' ? fmtUsed(r.used) + ' 플레이 · ' : ''}최고 ${best}점</p>
       ${r.score > 0 ? `<div class="rank">${LB.shared ? '이번 점수는 전체' : '이 브라우저 기록 중'} <b>${r.rank}위</b></div>` : ''}
       <button class="btn" id="againBtn">다시 하기</button>
       <button class="linkBtn" id="modeBtn" type="button">모드 바꾸기</button>
