@@ -274,7 +274,6 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
     [[0,1],[0,2],[1,0],[1,1]],
     [[0,0],[0,1],[0,2],[1,0],[1,1],[1,2]],
   ];
-  const WEIGHT = [2,3,3,3,2,3,1,3,3,1,2,2,2];
   const norm = s => {
     const mr = Math.min(...s.map(p=>p[0])), mc = Math.min(...s.map(p=>p[1]));
     return s.map(([r,c]) => [r-mr, c-mc]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
@@ -286,10 +285,22 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
       s = norm(s.map(([r,c]) => [c,-r]));
       seen.set(JSON.stringify(s), s);
     }
-    // Rotations of the same base share its weight.
-    seen.forEach(cells => SHAPES.push({ cells, w: WEIGHT[i] / seen.size }));
+    // Rotations of the same base share its weight (see pickShape).
+    seen.forEach(cells => SHAPES.push({ cells, b: i, n: seen.size }));
   });
-  const totalW = SHAPES.reduce((a, s) => a + s.w, 0);
+
+  // Difficulty, felt rather than announced. `t` blends the piece mix from friendly (EASY_W) toward
+  // awkward (HARD_W); `help` is the share of tray pieces picked to suit the board.
+  // 90-second mode stays gentle throughout. Endless is fully helped until HELP_UNTIL points, then
+  // eases toward its hardest setting at HARD_AT. Weight order matches BASE.
+  const EASY_W = [3, 4, 4, 2, .5, 3, .2, 4, 2, .2, 1, .5, .5];
+  const HARD_W = [.5, 1, 2, 3, 3, 2, 3, 1.5, 3, 3, 3, 3.5, 3];
+  const HELP_UNTIL = 600, HARD_AT = 4000;
+  function difficulty() {
+    if (mode !== 'endless') return { t: .1, help: .85 };
+    const k = Math.min(1, Math.max(0, (score - HELP_UNTIL) / (HARD_AT - HELP_UNTIL)));
+    return { t: .75 * k, help: 1 - .45 * k };
+  }
 
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), dockEl = $('dock'), overlay = $('overlay'), stage = $('stage');
@@ -387,16 +398,78 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
 
   /* ---------- Board logic ---------- */
   function pickShape() {
-    let r = Math.random() * totalW;
-    for (const s of SHAPES) { r -= s.w; if (r <= 0) return s.cells; }
+    const { t } = difficulty();
+    const wOf = s => (EASY_W[s.b] + (HARD_W[s.b] - EASY_W[s.b]) * t) / s.n;
+    let total = 0;
+    for (const s of SHAPES) total += wOf(s);
+    let r = Math.random() * total;
+    for (const s of SHAPES) { r -= wOf(s); if (r <= 0) return s.cells; }
     return SHAPES[0].cells;
   }
   const dims = s => [Math.max(...s.map(p=>p[0]))+1, Math.max(...s.map(p=>p[1]))+1];
   const fits = (s, r0, c0) => s.every(([r,c]) => { const R=r0+r, C=c0+c; return R>=0&&C>=0&&R<N&&C<N&&!grid[R][C]; });
   const anyFit = s => { for (let r=0;r<N;r++) for (let c=0;c<N;c++) if (fits(s,r,c)) return true; return false; };
 
+  // How well a piece suits a board: its best spot, rewarding finished lines and snug contact,
+  // penalising cells it walls off. Works on a copy so trays can be planned ahead.
+  function bestSpot(g, sh) {
+    let best = null;
+    for (let r0 = 0; r0 < N; r0++) for (let c0 = 0; c0 < N; c0++) {
+      if (!sh.every(([r, c]) => r0 + r < N && c0 + c < N && !g[r0 + r][c0 + c])) continue;
+      const h = g.map(row => row.slice());
+      for (const [r, c] of sh) h[r0 + r][c0 + c] = 1;
+      let lines = 0, contact = 0, holes = 0;
+      const full = [];
+      for (let i = 0; i < N; i++) {
+        if (h[i].every(Boolean)) { lines++; full.push(['r', i]); }
+        if (h.every(row => row[i])) { lines++; full.push(['c', i]); }
+      }
+      const solid = (r, c) => r < 0 || c < 0 || r >= N || c >= N || h[r][c];
+      for (const [r, c] of sh) {
+        for (const [dr, dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const R = r0 + r + dr, C = c0 + c + dc;
+          if (solid(R, C)) contact++;
+          else if (solid(R + 1, C) && solid(R - 1, C) && solid(R, C + 1) && solid(R, C - 1)) holes++;
+        }
+      }
+      for (const [k, i] of full) for (let j = 0; j < N; j++) { if (k === 'r') h[i][j] = 0; else h[j][i] = 0; }
+      const q = lines * 100 + contact * 2 - holes * 15 + sh.length;
+      if (!best || q > best.q) best = { q, after: h };
+    }
+    return best;
+  }
+
   function newTray() {
-    tray = [0,1,2].map(() => ({ cells: pickShape(), color: COLORS[Math.floor(Math.random()*COLORS.length)] }));
+    const colorOf = () => COLORS[Math.floor(Math.random() * COLORS.length)];
+    {
+      // Plan the tray against the board as it will look after each earlier piece goes down,
+      // so helped trays can always be placed in full.
+      const { help } = difficulty();
+      let g = grid.map(row => row.map(Boolean));
+      tray = [0,1,2].map(() => {
+        let cells;
+        if (Math.random() < help) {
+          const seen = new Set(), opts = [];
+          for (let k = 0; k < 12; k++) {
+            const sh = pickShape(), key = JSON.stringify(sh);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const spot = bestSpot(g, sh);
+            if (spot) opts.push({ sh, spot });
+          }
+          opts.sort((x, y) => y.spot.q - x.spot.q);
+          // Usually the best fit, sometimes a close runner-up, so trays don't feel scripted.
+          const roll = Math.random(), pick = opts[roll < .7 ? 0 : roll < .9 ? 1 : 2] || opts[0];
+          if (pick) { cells = pick.sh; g = pick.spot.after; }
+        }
+        if (!cells) {
+          cells = pickShape();
+          const spot = bestSpot(g, cells);
+          if (spot) g = spot.after;
+        }
+        return { cells, color: colorOf() };
+      });
+    }
     // Keep at least one placeable piece on a fresh tray when possible.
     for (let tries = 0; tries < 20 && !tray.some(p => anyFit(p.cells)); tries++) tray[0].cells = pickShape();
   }
@@ -713,6 +786,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; }
   function updateHudMode() {
     const timed = mode === 'timed';
     $('time').textContent = fmt(running ? timeLeft : TIME);
+    $('barFill').style.transform = `scaleX(${running ? timeLeft / TIME : 1})`;
     $('timeBox').hidden = !timed;
     $('bar').hidden = !timed;
     $('modeMark').textContent = timed ? '90' : '∞';
